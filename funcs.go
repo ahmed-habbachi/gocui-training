@@ -14,100 +14,151 @@ var (
 	dView  *gocui.View
 )
 
+// relSize calculates the  sizes of the sites view width
+// and the news view height in relation to the current terminal size
+func relSize(g *gocui.Gui) (int, int) {
+	tw, th := g.Size()
+
+	return (tw * 3) / 10, (th * 70) / 100
+}
+
 func layout(g *gocui.Gui) error {
-	maxX, _ := g.Size()
+	// Get the current terminal size.
+	tw, th := g.Size()
+
+	// Get the relative size of the views
+	rw, rh := relSize(g)
 
 	// Title
-	if v, err := g.SetView("title", maxX/2-15, 1, maxX/2+15, 3); err != nil {
+	if v, err := g.SetView("new-user", 0, 0, rw, th-1); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		fmt.Fprintln(v, "Add New User")
+		v.Title = "[1]-New User"
 	}
 
 	// Name input
-	if v, err := g.SetView("name", maxX/2-20, 4, maxX/2+20, 6); err != nil {
+	if v, err := g.SetView("name", 1, 1, rw-1, 3); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
 		v.Editable = true
+		v.Highlight = true
 		v.Title = "Name"
+
+		if _, err = setCurrentViewOnTop(g, "name"); err != nil {
+			return err
+		}
 	}
 
 	// Age input
-	if v, err := g.SetView("age", maxX/2-20, 7, maxX/2+20, 9); err != nil {
+	if v, err := g.SetView("age", 1, 4, rw-1, 6); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
 		v.Editable = true
+		v.Highlight = true
 		v.Title = "Age"
 	}
 
 	// Email input
-	if v, err := g.SetView("email", maxX/2-20, 10, maxX/2+20, 12); err != nil {
+	if v, err := g.SetView("email", 1, 7, rw-1, 9); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
 		v.Editable = true
+		v.Highlight = true
 		v.Title = "Email"
 	}
 
-	// Output view
-	if v, err := g.SetView("output", maxX/2-20, 13, maxX/2+20, 16); err != nil {
+	// User list view
+	if v, err := g.SetView("user-list", rw+1, 0, tw-1, rh-1); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Wrap = true
-		v.Title = "Info"
+		v.Title = "[2]-User list"
 	}
-
-	// Set default view to Name
-	if _, err := g.SetCurrentView("name"); err != nil {
-		return err
+	// Output view
+	if v, err := g.SetView("debug", rw+1, rh+1, tw-1, th-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Title = "Debug Output"
+		fmt.Fprintln(v, "Debug information will appear here...")
 	}
 
 	return nil
 }
 
 func submit(g *gocui.Gui, v *gocui.View) error {
-	input := strings.TrimSpace(v.Buffer())
-	parts := strings.Split(input, ",")
-	if len(parts) != 3 {
-		showMessage(g, "Invalid input. Use: name,age,email")
+	nameView, _ := g.View("name")
+	ageView, _ := g.View("age")
+	emailView, _ := g.View("email")
+
+	name := strings.TrimSpace(nameView.Buffer())
+	ageStr := strings.TrimSpace(ageView.Buffer())
+	email := strings.TrimSpace(emailView.Buffer())
+
+	if name == "" || ageStr == "" || email == "" {
+		showMessage(g, "Error: All fields are required")
 		return nil
 	}
 
-	name := strings.TrimSpace(parts[0])
-	age, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	age, err := strconv.Atoi(strings.TrimSpace(ageStr))
 	if err != nil {
 		showMessage(g, "Age must be a number")
 		return nil
 	}
-	email := strings.TrimSpace(parts[2])
 
 	user := models.AddUser(name, age, email)
 	showMessage(g, fmt.Sprintf("Added: %s (%d)", user.Name, user.Id))
 
-	v.Clear()
-	v.SetCursor(0, 0)
+	nameView.Clear()
+	ageView.Clear()
+	emailView.Clear()
+	SwitchView(g, nameView)
+
 	return nil
 }
 
-func switchView(next string) func(*gocui.Gui, *gocui.View) error {
-	return func(g *gocui.Gui, v *gocui.View) error {
-		_, err := g.SetCurrentView(next)
+func SwitchView(g *gocui.Gui, v *gocui.View) error {
+	nextIndex := (active + 1) % len(views)
+	name := views[nextIndex]
+
+	// reset cursor if view is empty
+	if _, err := setCurrentViewOnTop(g, name); err != nil {
+		showMessage(g, fmt.Sprintf("Error %s", err))
 		return err
 	}
+	active = nextIndex
+
+	return nil
+}
+
+func setCurrentViewOnTop(g *gocui.Gui, name string) (*gocui.View, error) {
+	if _, err := g.SetCurrentView(name); err != nil {
+		return nil, err
+	}
+	return g.SetViewOnTop(name)
 }
 
 func showMessage(g *gocui.Gui, msg string) {
 	g.Update(func(gui *gocui.Gui) error {
-		v, err := g.View("output")
+		v, err := g.View("debug")
 		if err != nil {
 			return err
 		}
-		v.Clear()
 		fmt.Fprintln(v, msg)
+
+		lines := len(v.BufferLines())
+		if lines > 0 {
+			_, viewHeight := v.Size()
+
+			if viewHeight > 0 && lines > viewHeight {
+				newOriginY := max(lines-viewHeight, 0)
+				_ = v.SetOrigin(0, newOriginY)
+			}
+		}
 		return nil
 	})
 }

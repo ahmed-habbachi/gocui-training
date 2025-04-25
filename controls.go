@@ -6,13 +6,12 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
-func keybindings(g *gocui.Gui) error {
-	views := []string{"name", "age", "email"}
-
-	// Tab through views
+func Keybindings(g *gocui.Gui) error {
 	for i := range views {
-		next := views[(i+1)%len(views)]
-		if err := g.SetKeybinding(views[i], gocui.KeyTab, gocui.ModNone, switchView(next)); err != nil {
+		viewName := views[i] // Capture the current view name for the closure
+
+		// Define the keybinding
+		if err := g.SetKeybinding(viewName, gocui.KeyTab, gocui.ModNone, SwitchView); err != nil {
 			return err
 		}
 	}
